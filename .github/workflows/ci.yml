@@ -18,10 +18,19 @@ permissions:
 
 env:
   AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: "051826698957"
   ECR_REPOSITORY: apex-dev-env-dev/api
+  ECS_CLUSTER: apex-dev-env-dev
+  ECS_SERVICE: apex-dev-env-dev-api
+  ECS_TASK_DEFINITION: apex-dev-env-dev-api
 
 jobs:
+
+  # ============================================================
+  # 1. TEST
+  # ============================================================
   test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
@@ -40,42 +49,142 @@ jobs:
       - name: Run tests
         run: npm test
 
+
+  # ============================================================
+  # 2. BUILD + PUSH IMAGE
+  # ============================================================
   build-and-push:
+    name: Build and Push Docker Image
     needs: test
+
+    # Don't build/push for pull requests
     if: github.event_name == 'push'
+
     runs-on: ubuntu-latest
+
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Debug GitHub OIDC claims
-        uses: github/actions-oidc-debugger@main
-        with:
-          audience: sts.amazonaws.com
 
+
+      # --------------------------------------------------------
+      # AWS OIDC LOGIN
+      # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::051826698957:role/apex-dev-env-dev-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
+
+      # --------------------------------------------------------
+      # ECR LOGIN
+      # --------------------------------------------------------
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+
+      # --------------------------------------------------------
+      # DOCKER BUILD
+      # --------------------------------------------------------
       - name: Build Docker image
+        id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+
         run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          echo "Building image:"
+          echo "$IMAGE"
+
           docker build \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t "$IMAGE" \
             .
 
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+
+      # --------------------------------------------------------
+      # DOCKER PUSH
+      # --------------------------------------------------------
       - name: Push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          echo "Pushing image:"
+          echo "$IMAGE"
+
+          docker push "$IMAGE"
+
+
+  # ============================================================
+  # 3. DEPLOY TO ECS
+  # ============================================================
+  deploy:
+    name: Deploy to ECS
+    needs: build-and-push
+
+    if: github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+
+      # --------------------------------------------------------
+      # AWS OIDC LOGIN
+      # --------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::051826698957:role/apex-dev-env-dev-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # --------------------------------------------------------
+      # DOWNLOAD CURRENT ECS TASK DEFINITION
+      # --------------------------------------------------------
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_DEFINITION" \
+            --query taskDefinition \
+            --output json > task-definition.json
+
+          echo "Current task definition downloaded."
+
+
+      # --------------------------------------------------------
+      # UPDATE IMAGE IN TASK DEFINITION
+      # --------------------------------------------------------
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: api
+          image: ${{ needs.build-and-push.outputs.image }}
+
+
+      # --------------------------------------------------------
+      # DEPLOY TASK DEFINITION TO ECS
+      # --------------------------------------------------------
+      - name: Deploy ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
