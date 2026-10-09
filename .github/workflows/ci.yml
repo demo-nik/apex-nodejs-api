@@ -49,8 +49,27 @@ jobs:
 
       - name: Run tests
         run: npm test
+###########################################################
+      - name: Debug OIDC claims (temporary)
+        shell: bash
+        run: |
+          TOKEN=$(curl -sS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value')
 
+          TOKEN="$TOKEN" python3 - <<'PY'
+          import os, json, base64
 
+          token = os.environ["TOKEN"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+
+          for key in ["sub", "repository", "repository_id", "repository_owner_id"]:
+              print(f"{key}: {claims.get(key)}")
+          PY
+  
   # ============================================================
   # 2. BUILD AND PUSH DOCKER IMAGE
   # ============================================================
