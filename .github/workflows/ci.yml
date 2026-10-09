@@ -1,3 +1,4 @@
+```yaml
 name: CI/CD
 
 on:
@@ -16,13 +17,14 @@ permissions:
   id-token: write
   contents: read
 
+# Common AWS configuration from GitHub Organization Variables
+# Application-specific configuration from Repository Variables
 env:
-  AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: "051826698957"
-  ECR_REPOSITORY: apex-dev-env-dev/api
-  ECS_CLUSTER: apex-dev-env-dev
-  ECS_SERVICE: apex-dev-env-dev-api
-  ECS_TASK_DEFINITION: apex-dev-env-dev-api
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+  ECS_TASK_DEFINITION: ${{ vars.ECS_TASK_DEFINITION }}
 
 jobs:
 
@@ -51,13 +53,13 @@ jobs:
 
 
   # ============================================================
-  # 2. BUILD + PUSH IMAGE
+  # 2. BUILD AND PUSH DOCKER IMAGE
   # ============================================================
   build-and-push:
     name: Build and Push Docker Image
     needs: test
 
-    # Don't build/push for pull requests
+    # Do not build or push images for pull requests
     if: github.event_name == 'push'
 
     runs-on: ubuntu-latest
@@ -68,17 +70,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-    
+
       # --------------------------------------------------------
       # AWS OIDC LOGIN
       # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::051826698957:role/apex-dev-env-dev-github-actions-role
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-
 
       # --------------------------------------------------------
       # ECR LOGIN
@@ -86,7 +86,6 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-
 
       # --------------------------------------------------------
       # DOCKER BUILD
@@ -96,19 +95,15 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
           echo "Building image:"
           echo "$IMAGE"
 
-          docker build \
-            -t "$IMAGE" \
-            .
+          docker build -t "$IMAGE" .
 
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-
 
       # --------------------------------------------------------
       # DOCKER PUSH
@@ -117,7 +112,6 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
@@ -142,16 +136,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-
       # --------------------------------------------------------
       # AWS OIDC LOGIN
       # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::051826698957:role/apex-dev-env-dev-github-actions-role
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-
 
       # --------------------------------------------------------
       # DOWNLOAD CURRENT ECS TASK DEFINITION
@@ -165,7 +157,6 @@ jobs:
 
           echo "Current task definition downloaded."
 
-
       # --------------------------------------------------------
       # UPDATE IMAGE IN TASK DEFINITION
       # --------------------------------------------------------
@@ -177,8 +168,7 @@ jobs:
           container-name: api
           image: ${{ needs.build-and-push.outputs.image }}
 
-
-      # -----------------------------------------------------------
+      # --------------------------------------------------------
       # DEPLOY TASK DEFINITION TO ECS
       # --------------------------------------------------------
       - name: Deploy ECS service
@@ -188,3 +178,4 @@ jobs:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+```
