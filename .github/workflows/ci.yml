@@ -16,6 +16,7 @@ permissions:
   id-token: write
   contents: read
 
+# Organization and repository configuration
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
@@ -24,7 +25,6 @@ env:
   ECS_TASK_DEFINITION: ${{ vars.ECS_TASK_DEFINITION }}
 
 jobs:
-
   # ============================================================
   # 1. TEST
   # ============================================================
@@ -48,7 +48,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-
   # ============================================================
   # 2. BUILD AND PUSH DOCKER IMAGE
   # ============================================================
@@ -65,64 +64,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --------------------------------------------------------
-      # TEMPORARY OIDC DIAGNOSTIC
-      # Prints selected claims only, never the token itself.
-      # --------------------------------------------------------
-      - name: Debug OIDC claims (temporary)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          RESPONSE=$(curl -fsS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
-
-          TOKEN=$(echo "$RESPONSE" | jq -r '.value')
-
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "Could not obtain GitHub OIDC token."
-            exit 1
-          fi
-
-          TOKEN="$TOKEN" python3 - <<'PY'
-          import os
-          import json
-          import base64
-
-          token = os.environ["TOKEN"]
-          payload = token.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-
-          for key in [
-              "sub",
-              "repository",
-              "repository_id",
-              "repository_owner_id"
-          ]:
-              print(f"{key}: {claims.get(key)}")
-          PY
-
-      # --------------------------------------------------------
-      # AWS OIDC LOGIN
-      # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # --------------------------------------------------------
-      # ECR LOGIN
-      # --------------------------------------------------------
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # --------------------------------------------------------
-      # DOCKER BUILD
-      # --------------------------------------------------------
       - name: Build Docker image
         id: build-image
         env:
@@ -131,16 +82,12 @@ jobs:
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-          echo "Building image:"
-          echo "$IMAGE"
+          echo "Building image: $IMAGE"
 
           docker build -t "$IMAGE" .
 
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-      # --------------------------------------------------------
-      # DOCKER PUSH
-      # --------------------------------------------------------
       - name: Push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -148,11 +95,9 @@ jobs:
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-          echo "Pushing image:"
-          echo "$IMAGE"
+          echo "Pushing image: $IMAGE"
 
           docker push "$IMAGE"
-
 
   # ============================================================
   # 3. DEPLOY TO ECS
@@ -167,18 +112,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --------------------------------------------------------
-      # AWS OIDC LOGIN
-      # --------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # --------------------------------------------------------
-      # DOWNLOAD CURRENT ECS TASK DEFINITION
-      # --------------------------------------------------------
       - name: Download current task definition
         run: |
           aws ecs describe-task-definition \
@@ -188,10 +127,7 @@ jobs:
 
           echo "Current task definition downloaded."
 
-      # --------------------------------------------------------
-      # UPDATE IMAGE IN TASK DEFINITION
-      # --------------------------------------------------------
-      - name: Update ECS task definition
+      - name: Update image in task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -199,9 +135,6 @@ jobs:
           container-name: api
           image: ${{ needs.build-and-push.outputs.image }}
 
-      # --------------------------------------------------------
-      # DEPLOY TASK DEFINITION TO ECS
-      # --------------------------------------------------------
       - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
