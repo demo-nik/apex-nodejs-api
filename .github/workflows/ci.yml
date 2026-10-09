@@ -16,8 +16,6 @@ permissions:
   id-token: write
   contents: read
 
-# Common AWS configuration from GitHub Organization Variables
-# Application-specific configuration from Repository Variables
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
@@ -49,37 +47,15 @@ jobs:
 
       - name: Run tests
         run: npm test
-###########################################################
-      - name: Debug OIDC claims (temporary)
-        shell: bash
-        run: |
-          TOKEN=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            | jq -r '.value')
 
-          TOKEN="$TOKEN" python3 - <<'PY'
-          import os, json, base64
 
-          token = os.environ["TOKEN"]
-          payload = token.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-
-          for key in ["sub", "repository", "repository_id", "repository_owner_id"]:
-              print(f"{key}: {claims.get(key)}")
-          PY
-  
   # ============================================================
   # 2. BUILD AND PUSH DOCKER IMAGE
   # ============================================================
   build-and-push:
     name: Build and Push Docker Image
     needs: test
-
-    # Do not build or push images for pull requests
     if: github.event_name == 'push'
-
     runs-on: ubuntu-latest
 
     outputs:
@@ -88,6 +64,45 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # TEMPORARY OIDC DIAGNOSTIC
+      # Prints selected claims only, never the token itself.
+      # --------------------------------------------------------
+      - name: Debug OIDC claims (temporary)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RESPONSE=$(curl -fsS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+
+          TOKEN=$(echo "$RESPONSE" | jq -r '.value')
+
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Could not obtain GitHub OIDC token."
+            exit 1
+          fi
+
+          TOKEN="$TOKEN" python3 - <<'PY'
+          import os
+          import json
+          import base64
+
+          token = os.environ["TOKEN"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+
+          for key in [
+              "sub",
+              "repository",
+              "repository_id",
+              "repository_owner_id"
+          ]:
+              print(f"{key}: {claims.get(key)}")
+          PY
 
       # --------------------------------------------------------
       # AWS OIDC LOGIN
@@ -145,9 +160,7 @@ jobs:
   deploy:
     name: Deploy to ECS
     needs: build-and-push
-
     if: github.event_name == 'push'
-
     runs-on: ubuntu-latest
 
     steps:
