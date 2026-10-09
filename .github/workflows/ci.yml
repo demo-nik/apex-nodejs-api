@@ -6,7 +6,6 @@ on:
       - main
       - release
       - "feature/**"
-
   pull_request:
     branches:
       - main
@@ -14,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -27,7 +25,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,6 +48,11 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
 
     steps:
       - name: Checkout code
@@ -67,6 +69,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
+        id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -79,17 +82,17 @@ jobs:
           echo "Pushing image: $IMAGE"
           docker push "$IMAGE"
 
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Deploy to ECS Dev
     needs: build_and_push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -109,7 +112,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: api
-          image: ${{ format('{0}/{1}:{2}', vars.AWS_ACCOUNT_ID, vars.ECR_REPOSITORY, github.sha) }}
+          image: ${{ needs.build_and_push.outputs.image }}
 
       - name: Deploy to ECS Dev
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
