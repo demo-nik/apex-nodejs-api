@@ -93,6 +93,23 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Diagnose S3 access before Terraform init
+        working-directory: infra/terraform
+        run: |
+          terraform version
+          aws sts get-caller-identity
+
+          aws s3api head-object \
+            --bucket apex-dev-env-051826698957-tfstate \
+            --key applications/apex-nodejs-api/terraform.tfstate \
+            --region ap-south-1
+
+          aws s3api get-object \
+            --bucket apex-dev-env-051826698957-tfstate \
+            --key applications/apex-nodejs-api/terraform.tfstate \
+            /tmp/terraform-state-test.json \
+            --region ap-south-1    
+
       - name: Terraform Init
         run: terraform init -input=false
 
