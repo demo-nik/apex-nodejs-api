@@ -84,6 +84,14 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Diagnose Terraform state access
+        run: |
+              aws sts get-caller-identity
+
+              aws s3api head-object \
+              --bucket apex-dev-env-051826698957-tfstate \
+              --key applications/apex-nodejs-api/terraform.tfstate \
+              --region ap-south-1
 
       - name: Terraform init
         working-directory: infra/terraform
