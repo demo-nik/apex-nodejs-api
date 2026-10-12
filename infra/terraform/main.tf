@@ -28,7 +28,7 @@ locals {
 }
 
 module "iam" {
-  source = "git::ssh://git@github.com/nikhilve99/apex-dev-env-infra.git//terraform/modules/iam?ref=main"
+  source = "git::ssh://git@github.com/demo-nik/apex-dev-env-infra.git//terraform/modules/iam?ref=main"
 
   name_prefix              = var.name_prefix
   roles                    = local.iam_roles
