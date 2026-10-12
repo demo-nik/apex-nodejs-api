@@ -92,6 +92,15 @@ jobs:
               --bucket apex-dev-env-051826698957-tfstate \
               --key applications/apex-nodejs-api/terraform.tfstate \
               --region ap-south-1
+      - name: Verify Terraform backend access
+        run: |
+              aws s3api list-objects-v2 \
+              --bucket apex-dev-env-051826698957-tfstate \
+              --prefix applications/apex-nodejs-api/terraform.tfstate \
+              --max-keys 5 \
+              --region ap-south-1
+
+              terraform init -input=false
 
       - name: Terraform init
         working-directory: infra/terraform
