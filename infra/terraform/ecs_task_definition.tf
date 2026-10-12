@@ -16,6 +16,19 @@ resource "aws_ecs_task_definition" "api" {
       image     = "051826698957.dkr.ecr.ap-south-1.amazonaws.com/apex-dev-env-dev/api:v1"
       essential = true
 
+      healthCheck = {
+        command = [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+
       portMappings = [
         {
           containerPort = 3000
