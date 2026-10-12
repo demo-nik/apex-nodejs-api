@@ -7,3 +7,7 @@ data "terraform_remote_state" "shared" {
     region = "ap-south-1"
   }
 }
+
+data "aws_ecs_task_definition" "api" {
+  task_definition = "apex-dev-env-dev-api"
+}
