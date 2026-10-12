@@ -9,6 +9,7 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform.yml"
+
   pull_request:
     branches:
       - main
@@ -16,6 +17,7 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform.yml"
+
   workflow_dispatch:
     inputs:
       apply:
@@ -30,8 +32,7 @@ on:
 permissions:
   contents: read
 
-# Hold this lock through review and apply so the application workflow cannot
-# change the live task definition image after the plan has read it.
+# Prevent concurrent Terraform and ECS deployments.
 concurrency:
   group: ecs-dev-deployment
   cancel-in-progress: false
@@ -47,9 +48,15 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       id-token: write
+
+    defaults:
+      run:
+        working-directory: infra/terraform
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -73,10 +80,11 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
           AUTH_HEADER="$(printf 'x-access-token:%s' "$MODULE_TOKEN" | base64 -w0)"
-          git config --global http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader "AUTHORIZATION: basic $AUTH_HEADER"
+          git config --global \
+            http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader \
+            "AUTHORIZATION: basic $AUTH_HEADER"
 
       - name: Terraform format check
-        working-directory: infra/terraform
         run: terraform fmt -check -recursive
 
       - name: Configure AWS credentials
@@ -84,40 +92,18 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_PLAN_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Diagnose Terraform state access
-        run: |
-              aws sts get-caller-identity
-
-              aws s3api head-object \
-              --bucket apex-dev-env-051826698957-tfstate \
-              --key applications/apex-nodejs-api/terraform.tfstate \
-              --region ap-south-1
-      - name: Verify Terraform backend access
-        run: |
-              aws s3api list-objects-v2 \
-              --bucket apex-dev-env-051826698957-tfstate \
-              --prefix applications/apex-nodejs-api/terraform.tfstate \
-              --max-keys 5 \
-              --region ap-south-1
-
-              terraform init -input=false
 
       - name: Terraform Init
-        working-directory: infra/terraform
         run: terraform init -input=false
 
       - name: Terraform Validate
-        working-directory: infra/terraform
         run: terraform validate
 
       - name: Terraform Plan
-        working-directory: infra/terraform
-        run: terraform plan -input=false
+        run: terraform plan -input=false -out=tfplan
 
       - name: Show readable Terraform plan
-        working-directory: infra/terraform
-        run: |
-          terraform show -no-color tfplan | tee tfplan.txt
+        run: terraform show -no-color tfplan | tee tfplan.txt
 
       - name: Upload saved plan and readable output
         uses: actions/upload-artifact@v4
@@ -137,10 +123,17 @@ jobs:
       github.ref == 'refs/heads/main' &&
       inputs.apply == 'true'
     runs-on: ubuntu-latest
+
     environment: dev
+
     permissions:
       contents: read
       id-token: write
+
+    defaults:
+      run:
+        working-directory: infra/terraform
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -164,7 +157,9 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
           AUTH_HEADER="$(printf 'x-access-token:%s' "$MODULE_TOKEN" | base64 -w0)"
-          git config --global http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader "AUTHORIZATION: basic $AUTH_HEADER"
+          git config --global \
+            http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader \
+            "AUTHORIZATION: basic $AUTH_HEADER"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -172,8 +167,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform init
-        working-directory: infra/terraform
+      - name: Terraform Init
         run: terraform init -input=false
 
       - name: Download reviewed plan
@@ -183,5 +177,4 @@ jobs:
           path: infra/terraform
 
       - name: Apply saved Terraform plan
-        working-directory: infra/terraform
         run: terraform apply -input=false tfplan
