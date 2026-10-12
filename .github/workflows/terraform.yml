@@ -118,12 +118,15 @@ jobs:
           terraform init -input=false -no-color
 
       - name: Terraform Validate
+        working-directory: infra/terraform
         run: terraform validate
 
       - name: Terraform Plan
+        working-directory: infra/terraform
         run: terraform plan -input=false -out=tfplan
 
       - name: Show readable Terraform plan
+        working-directory: infra/terraform
         run: terraform show -no-color tfplan | tee tfplan.txt
 
       - name: Upload saved plan and readable output
