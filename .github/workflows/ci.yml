@@ -41,9 +41,30 @@ jobs:
       - name: Run tests
         run: npm test
 
+  sonar:
+    name: SonarCloud Analysis and Quality Gate
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+
   build_and_push:
     name: Build and Push to ECR
-    needs: test
+    needs: sonar
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
@@ -121,4 +142,3 @@ jobs:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
-###################

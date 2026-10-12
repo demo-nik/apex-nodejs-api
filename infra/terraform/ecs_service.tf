@@ -1,9 +1,18 @@
 resource "aws_ecs_service" "api" {
+
   name            = "apex-dev-env-dev-api"
   cluster         = data.terraform_remote_state.shared.outputs.ecs_cluster_arn
-  task_definition = aws_ecs_task_definition.api.arn
+  task_definition = "arn:aws:ecs:ap-south-1:051826698957:task-definition/apex-dev-env-dev-api:10"
 
   desired_count = 1
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   launch_type = "FARGATE"
 
