@@ -13,3 +13,12 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+variable "image_uri" {
+  description = "Immutable application container image URI deployed to ECS"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.image_uri)) > 0
+    error_message = "image_uri must not be empty."
+  }
+}

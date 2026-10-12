@@ -61,7 +61,6 @@ jobs:
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
 
-
   build_and_push:
     name: Build and Push to ECR
     needs: sonar
@@ -105,40 +104,86 @@ jobs:
 
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-  deploy:
-    name: Deploy to ECS Dev
+  terraform_plan:
+    name: Terraform Plan
     needs: build_and_push
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_image_uri: ${{ needs.build_and_push.outputs.image }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download current ECS task definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition "$ECS_TASK_DEFINITION" \
-            --query taskDefinition \
-            --output json > task-definition.json
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -input=false
 
-      - name: Render task definition with new image
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: task-definition.json
-          container-name: api
-          image: ${{ needs.build_and_push.outputs.image }}
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: terraform validate
 
-      - name: Deploy to ECS Dev
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Show Terraform Plan for Review
+        working-directory: infra/terraform
+        run: terraform show -no-color tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
         with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+          name: terraform-plan
+          path: infra/terraform/tfplan
+          if-no-files-found: error
+          retention-days: 1
+
+  terraform_apply:
+    name: Terraform Apply
+    needs: terraform_plan
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform
+
+      - name: Terraform Apply Approved Plan
+        working-directory: infra/terraform
+        run: terraform apply -input=false tfplan

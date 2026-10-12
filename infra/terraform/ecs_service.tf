@@ -2,12 +2,9 @@ resource "aws_ecs_service" "api" {
 
   name            = "apex-dev-env-dev-api"
   cluster         = data.terraform_remote_state.shared.outputs.ecs_cluster_arn
-  task_definition = data.aws_ecs_task_definition.api.arn
+  task_definition = aws_ecs_task_definition.api.arn
 
   desired_count = 1
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
 
   deployment_circuit_breaker {
     enable   = true
