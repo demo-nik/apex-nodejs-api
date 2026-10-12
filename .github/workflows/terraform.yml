@@ -111,7 +111,11 @@ jobs:
             --region ap-south-1    
 
       - name: Terraform Init
-        run: terraform init -input=false
+        working-directory: infra/terraform
+        run: |
+          pwd
+          ls -la
+          terraform init -input=false -no-color
 
       - name: Terraform Validate
         run: terraform validate
