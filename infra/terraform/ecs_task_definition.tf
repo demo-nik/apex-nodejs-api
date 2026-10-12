@@ -10,7 +10,7 @@ resource "aws_ecs_task_definition" "api" {
   container_definitions = jsonencode([
     {
       name      = "api"
-      image     = var.image_uri
+      image     = local.current_api_container.image
       cpu       = 0
       essential = true
 
@@ -51,5 +51,12 @@ resource "aws_ecs_task_definition" "api" {
     }
   ])
 
-  tags = var.tags
+  tags         = var.tags
+  skip_destroy = true
+
+  lifecycle {
+    # CI owns container definitions, including the image and other container settings.
+    # Terraform ignores all changes to this attribute to avoid reverting CI deployments.
+    ignore_changes = [container_definitions]
+  }
 }

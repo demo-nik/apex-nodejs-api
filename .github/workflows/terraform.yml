@@ -1,0 +1,170 @@
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+      - release
+      - "feature/**"
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    branches:
+      - main
+      - release
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the reviewed plan after dev environment approval
+        required: true
+        type: choice
+        options:
+          - "false"
+          - "true"
+        default: "false"
+
+permissions:
+  contents: read
+
+# Hold this lock through review and apply so the application workflow cannot
+# change the live task definition image after the plan has read it.
+concurrency:
+  group: ecs-dev-deployment
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: Terraform validation and plan
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Create read-only module access token
+        id: module-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.TF_MODULE_APP_ID }}
+          private-key: ${{ secrets.TF_MODULE_APP_PRIVATE_KEY }}
+          owner: demo-nik
+          repositories: apex-dev-env-infra
+          permission-contents: read
+
+      - name: Configure Git access to Terraform module
+        env:
+          MODULE_TOKEN: ${{ steps.module-token.outputs.token }}
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$MODULE_TOKEN" | base64 -w0)"
+          git config --global http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader "AUTHORIZATION: basic $AUTH_HEADER"
+
+      - name: Terraform format check
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        working-directory: infra/terraform
+        run: terraform validate
+
+      - name: Create saved Terraform plan
+        working-directory: infra/terraform
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Show readable Terraform plan
+        working-directory: infra/terraform
+        run: |
+          terraform show -no-color tfplan | tee tfplan.txt
+
+      - name: Upload saved plan and readable output
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: |
+            infra/terraform/tfplan
+            infra/terraform/tfplan.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  apply:
+    name: Apply approved Terraform plan
+    needs: plan
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.apply == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Create read-only module access token
+        id: module-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.TF_MODULE_APP_ID }}
+          private-key: ${{ secrets.TF_MODULE_APP_PRIVATE_KEY }}
+          owner: demo-nik
+          repositories: apex-dev-env-infra
+          permission-contents: read
+
+      - name: Configure Git access to Terraform module
+        env:
+          MODULE_TOKEN: ${{ steps.module-token.outputs.token }}
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$MODULE_TOKEN" | base64 -w0)"
+          git config --global http.https://github.com/demo-nik/apex-dev-env-infra.git/.extraheader "AUTHORIZATION: basic $AUTH_HEADER"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      - name: Download reviewed plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform
+
+      - name: Apply saved Terraform plan
+        working-directory: infra/terraform
+        run: terraform apply -input=false tfplan

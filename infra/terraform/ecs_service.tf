@@ -4,6 +4,10 @@ resource "aws_ecs_service" "api" {
   cluster         = data.terraform_remote_state.shared.outputs.ecs_cluster_arn
   task_definition = aws_ecs_task_definition.api.arn
 
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
   desired_count = 1
 
   deployment_circuit_breaker {
