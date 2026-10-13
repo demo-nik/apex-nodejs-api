@@ -8,7 +8,7 @@ app.use(express.json());
 app.get('/', (request, response) => {
   response.json({
     name: 'apex-nodejs-api',
-    description: 'A small REST API for learning containerized application TEST deployment.',
+    description: 'A small REST API for learning containerized application deployment.',
     status: 'running',
   });
 });
