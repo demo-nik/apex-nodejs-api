@@ -4,8 +4,8 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn       = "arn:aws:iam::051826698957:role/apex-dev-env-dev-api-execution-role"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"
-  memory                   = "1024"
+  cpu                      = "256"
+  memory                   = "512"
 
   container_definitions = jsonencode([
     {
