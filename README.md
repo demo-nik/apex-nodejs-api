@@ -81,4 +81,4 @@ Do not put credentials or secrets in `.env.example` or commit `.env` files.
 
 This API is intentionally independent of AWS. Later learning steps can build and tag its Docker image, publish it to ECR, run it as an ECS task and service, add IAM roles and CloudWatch logs, and provision application infrastructure with Terraform. Those integrations and CI/CD workflows are not part of this repository yet.
 
-
+####
