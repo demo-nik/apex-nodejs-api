@@ -9,6 +9,7 @@ resource "aws_ecs_service" "api" {
   }
 
   desired_count = 1
+  enable_execute_command = true
 
   deployment_circuit_breaker {
     enable   = true
