@@ -5,7 +5,7 @@ resource "aws_ecs_task_definition" "api" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = "512"
-  memory                   = "512"
+  memory                   = "1024"
 
   container_definitions = jsonencode([
     {
