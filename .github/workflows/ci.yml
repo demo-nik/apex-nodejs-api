@@ -6,10 +6,16 @@ on:
       - main
       - release
       - "feature/**"
+    paths-ignore:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
   pull_request:
     branches:
       - main
       - release
+    paths-ignore:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
 
 permissions:
   contents: read
