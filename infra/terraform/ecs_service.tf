@@ -8,7 +8,7 @@ resource "aws_ecs_service" "api" {
     ignore_changes = [task_definition]
   }
 
-  desired_count = 2
+  desired_count = 1
 
   deployment_circuit_breaker {
     enable   = true
