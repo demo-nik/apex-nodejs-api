@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const express = require('express');
-const { app, createApp, errorHandler } = require('../src/app');
-const { createProfileServiceClient } = require('../src/profile-service-client');
+const { app, createApp, errorHandler, log } = require('../src/app');
+const { createProfileServiceClient, DEFAULT_TIMEOUT_MS } = require('../src/profile-service-client');
 
 async function withServer(application, run) {
   const server = application.listen(0, '127.0.0.1');
@@ -105,6 +105,66 @@ test('GET /api/profile fails safely when PROFILE_SERVICE_URL is missing', async 
   });
 });
 
+test('profile client is unavailable when fetch is missing or URL is invalid', async () => {
+  assert.deepEqual(await createProfileServiceClient({ serviceUrl: 'http://service', fetchImpl: null })(), {
+    ok: false, kind: 'unavailable',
+  });
+  assert.deepEqual(await createProfileServiceClient({ serviceUrl: 'not a URL' })(), {
+    ok: false, kind: 'unavailable',
+  });
+  assert.deepEqual(await createProfileServiceClient({ serviceUrl: 'ftp://service' })(), {
+    ok: false, kind: 'unavailable',
+  });
+  assert.equal(DEFAULT_TIMEOUT_MS, 2_000);
+});
+
+test('profile client requests the fixed path on the configured HTTP base URL', async () => {
+  let request;
+  const getProfile = createProfileServiceClient({
+    serviceUrl: 'https://service.example:8443/some/base?token=secret',
+    fetchImpl: async (...args) => {
+      request = args;
+      return { ok: true, json: async () => ({ id: 'p-1' }) };
+    },
+  });
+
+  assert.deepEqual(await getProfile(), { ok: true, profile: { id: 'p-1' } });
+  assert.equal(String(request[0]), 'https://service.example:8443/api/profile');
+  assert.deepEqual(request[1].headers, { accept: 'application/json' });
+  assert.ok(request[1].signal instanceof AbortSignal);
+});
+
+test('profile client treats malformed JSON and abort errors as failures', async () => {
+  const badJson = createProfileServiceClient({
+    serviceUrl: 'http://service',
+    fetchImpl: async () => ({ ok: true, json: async () => { throw new SyntaxError('bad JSON'); } }),
+  });
+  assert.deepEqual(await badJson(), { ok: false, kind: 'connection' });
+
+  const aborted = createProfileServiceClient({
+    serviceUrl: 'http://service',
+    fetchImpl: async () => {
+      const error = new Error('aborted');
+      error.name = 'AbortError';
+      throw error;
+    },
+  });
+  assert.deepEqual(await aborted(), { ok: false, kind: 'timeout' });
+});
+
+test('GET /api/profile maps unavailable and timeout results to their HTTP statuses', async () => {
+  for (const [kind, status, message] of [
+    ['unavailable', 503, 'Profile service is unavailable'],
+    ['timeout', 504, 'Profile service timed out'],
+  ]) {
+    await withServer(createApp({ getProfile: async () => ({ ok: false, kind }) }), async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/profile`);
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { error: message });
+    });
+  }
+});
+
 test('unknown routes return JSON 404', async () => {
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/missing`);
@@ -125,4 +185,35 @@ test('unexpected errors return a generic 500 response without stack details', as
     assert.equal(body, '{"error":"Internal Server Error"}');
     assert.equal(body.includes('sensitive'), false);
   });
+});
+
+test('error handler delegates when response headers have already been sent', () => {
+  const error = new Error('late failure');
+  let forwarded;
+  const result = errorHandler(error, {}, { headersSent: true }, (received) => {
+    forwarded = received;
+    return 'delegated';
+  });
+  assert.equal(result, 'delegated');
+  assert.equal(forwarded, error);
+});
+
+test('log writes structured entries at the selected console level', () => {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const entries = [];
+  console.log = (entry) => entries.push(JSON.parse(entry));
+  console.error = (entry) => entries.push(JSON.parse(entry));
+  try {
+    log('info', 'started', { port: 3000 });
+    log('error', 'failed', { code: 'EADDRINUSE' });
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+  assert.equal(entries[0].level, 'info');
+  assert.equal(entries[0].port, 3000);
+  assert.equal(entries[1].level, 'error');
+  assert.equal(entries[1].code, 'EADDRINUSE');
+  assert.ok(Number.isFinite(Date.parse(entries[0].timestamp)));
 });
