@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
 const test = require('node:test');
 const express = require('express');
 const { app, createApp, errorHandler, log } = require('../src/app');
@@ -216,4 +217,47 @@ test('log writes structured entries at the selected console level', () => {
   assert.equal(entries[1].level, 'error');
   assert.equal(entries[1].code, 'EADDRINUSE');
   assert.ok(Number.isFinite(Date.parse(entries[0].timestamp)));
+});
+
+test('server starts and shuts down cleanly on SIGTERM', async () => {
+  const child = spawn(process.execPath, ['src/server.js'], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: '0', NODE_ENV: 'test' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  child.stderr.on('data', (chunk) => { output += chunk; });
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Server did not start in time')), 5_000);
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.stdout.on('data', (chunk) => {
+      if (output.includes('Server started')) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once('exit', (code) => {
+      if (!output.includes('Server started')) {
+        clearTimeout(timeout);
+        reject(new Error(`Server exited before starting with code ${code}: ${output}`));
+      }
+    });
+  });
+
+  child.kill('SIGTERM');
+  const [code, signal] = await new Promise((resolve) => child.once('exit', (exitCode, exitSignal) => {
+    resolve([exitCode, exitSignal]);
+  }));
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+  assert.match(output, /Server started/);
+  assert.match(output, /Server shutting down; stopping new connections/);
+  assert.match(output, /Server stopped/);
 });
