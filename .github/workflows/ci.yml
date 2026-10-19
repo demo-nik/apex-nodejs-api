@@ -44,8 +44,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Run tests and generate coverage
+        run: npm run coverage
+
+      - name: Upload SonarCloud coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-coverage
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 1
 
   sonar:
     name: SonarCloud Analysis and Quality Gate
@@ -57,6 +65,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download SonarCloud coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-coverage
+          path: coverage
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v5
